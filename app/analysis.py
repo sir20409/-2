@@ -340,6 +340,3 @@ def run_analysis(file_list):
         "Y2":
             result_Y2
     }
-        "Y2":
-            result_Y2
-    }
