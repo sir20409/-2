@@ -6,6 +6,9 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import silhouette_score
+
+from mpl_toolkits.mplot3d import Axes3D
 
 import io
 import base64
@@ -13,10 +16,6 @@ import base64
 
 
 def run_analysis(file_list):
-
-    # =========================
-    # 데이터 불러오기
-    # =========================
 
     dfs = []
 
@@ -44,7 +43,6 @@ def run_analysis(file_list):
 
 
     data = data.dropna()
-
 
 
     numeric_cols = [
@@ -98,7 +96,6 @@ def run_analysis(file_list):
     X_const = sm.add_constant(X)
 
 
-
     vif = pd.DataFrame()
 
     vif["Variable"] = X_const.columns
@@ -123,7 +120,9 @@ def run_analysis(file_list):
     def fit_model(target):
 
 
-        # ---------- 회귀 ----------
+        # =====================
+        # 회귀 분석
+        # =====================
 
         y = data[target]
 
@@ -140,7 +139,10 @@ def run_analysis(file_list):
 
 
 
-        # ---------- K-means ----------
+        # =====================
+        # K-means 3차원
+        # X1, X2, Y
+        # =====================
 
         k_data = data[
             [
@@ -159,8 +161,43 @@ def run_analysis(file_list):
         )
 
 
+
+        # 최적 n 찾기
+
+        best_k = 2
+        best_score = -1
+
+
+        for k in range(2, 11):
+
+            temp = KMeans(
+                n_clusters=k,
+                random_state=42,
+                n_init=10
+            )
+
+
+            temp_cluster = temp.fit_predict(
+                scaled
+            )
+
+
+            score = silhouette_score(
+                scaled,
+                temp_cluster
+            )
+
+
+            if score > best_score:
+                best_score = score
+                best_k = k
+
+
+
+        # 최적 n으로 학습
+
         kmeans = KMeans(
-            n_clusters=3,
+            n_clusters=best_k,
             random_state=42,
             n_init=10
         )
@@ -172,67 +209,78 @@ def run_analysis(file_list):
 
 
 
-        # =========================
+        # =====================
         # 그래프 생성
-        # =========================
+        # =====================
 
-        fig, ax = plt.subplots(
-            2,
-            1,
+        fig = plt.figure(
             figsize=(8,12)
         )
 
 
+        # 위 : 회귀
 
-        # -------------------------
-        # 위 : 회귀 그래프
-        # -------------------------
+        ax0 = fig.add_subplot(
+            211
+        )
 
-        ax[0].scatter(
+
+        ax0.scatter(
             y,
             pred
         )
 
 
-        ax[0].set_xlabel(
+        ax0.set_xlabel(
             "Actual"
         )
 
 
-        ax[0].set_ylabel(
+        ax0.set_ylabel(
             "Predicted"
         )
 
 
-        ax[0].set_title(
+        ax0.set_title(
             f"{target} Regression"
         )
 
 
 
-        # -------------------------
-        # 아래 : K-means
-        # -------------------------
+        # 아래 : 3D K-means
 
-        ax[1].scatter(
-            data["X1"],
-            data["X2"],
-            c=cluster
+        ax1 = fig.add_subplot(
+            212,
+            projection="3d"
         )
 
 
-        ax[1].set_xlabel(
+        ax1.scatter(
+            data["X1"],
+            data["X2"],
+            data[target],
+            c=cluster,
+            s=50
+        )
+
+
+        ax1.set_xlabel(
             "X1"
         )
 
 
-        ax[1].set_ylabel(
+        ax1.set_ylabel(
             "X2"
         )
 
 
-        ax[1].set_title(
-            f"K-means clustering ({target})"
+        ax1.set_zlabel(
+            target
+        )
+
+
+        ax1.set_title(
+            f"K-means 3D ({target}), n={best_k}"
         )
 
 
@@ -241,9 +289,9 @@ def run_analysis(file_list):
 
 
 
-        # =========================
-        # 이미지 -> base64 변환
-        # =========================
+        # =====================
+        # 그래프 base64 변환
+        # =====================
 
         buffer = io.BytesIO()
 
@@ -268,10 +316,6 @@ def run_analysis(file_list):
 
 
 
-        # =========================
-        # 결과 반환
-        # =========================
-
         return {
 
             "R_squared":
@@ -294,14 +338,23 @@ def run_analysis(file_list):
                 cluster.tolist(),
 
 
+            "optimal_k":
+                best_k,
+
+
+            "silhouette_score":
+                float(best_score),
+
+
             "cluster_centers":
                 kmeans.cluster_centers_.tolist()
+
         }
 
 
 
     # =========================
-    # Y1 / Y2 실행
+    # Y1 / Y2
     # =========================
 
     result_Y1 = fit_model(
@@ -314,10 +367,6 @@ def run_analysis(file_list):
     )
 
 
-
-    # =========================
-    # 최종 반환
-    # =========================
 
     return {
 
@@ -339,4 +388,5 @@ def run_analysis(file_list):
 
         "Y2":
             result_Y2
+
     }
