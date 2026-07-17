@@ -4,7 +4,12 @@ import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-import os
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+import io
+import base64
+
 
 
 def run_analysis(file_list):
@@ -19,7 +24,6 @@ def run_analysis(file_list):
 
         df = pd.read_excel(file)
 
-        # 컬럼명 지정
         df.columns = [
             "지역",
             "X1",
@@ -32,15 +36,17 @@ def run_analysis(file_list):
         dfs.append(df)
 
 
-    # 데이터 병합
-    data = pd.concat(dfs, ignore_index=True)
+
+    data = pd.concat(
+        dfs,
+        ignore_index=True
+    )
 
 
-    # 결측치 제거
     data = data.dropna()
 
 
-    # 숫자형 변환
+
     numeric_cols = [
         "X1",
         "X2",
@@ -56,13 +62,12 @@ def run_analysis(file_list):
     )
 
 
-    # 변환 실패 제거
     data = data.dropna()
 
 
 
     # =========================
-    # 기초 통계량
+    # 기초 통계
     # =========================
 
     describe_result = data.describe()
@@ -78,7 +83,7 @@ def run_analysis(file_list):
 
 
     # =========================
-    # VIF 계산
+    # VIF
     # =========================
 
     X = data[
@@ -93,6 +98,7 @@ def run_analysis(file_list):
     X_const = sm.add_constant(X)
 
 
+
     vif = pd.DataFrame()
 
     vif["Variable"] = X_const.columns
@@ -103,16 +109,21 @@ def run_analysis(file_list):
             X_const.values,
             i
         )
-        for i in range(X_const.shape[1])
+        for i in range(
+            X_const.shape[1]
+        )
     ]
 
 
 
     # =========================
-    # 회귀분석 함수
+    # 회귀 + K-means
     # =========================
 
     def fit_model(target):
+
+
+        # ---------- 회귀 ----------
 
         y = data[target]
 
@@ -123,116 +134,143 @@ def run_analysis(file_list):
         ).fit()
 
 
-
-        # 예측값
-
         pred = model.predict(
             X_const
         )
 
 
 
-        # =====================
-        # 실제값-예측값 그래프
-        # =====================
+        # ---------- K-means ----------
 
-        os.makedirs(
-            "images",
-            exist_ok=True
+        k_data = data[
+            [
+                "X1",
+                "X2",
+                target
+            ]
+        ]
+
+
+        scaler = StandardScaler()
+
+
+        scaled = scaler.fit_transform(
+            k_data
         )
 
 
-        plt.figure(
-            figsize=(6,6)
+        kmeans = KMeans(
+            n_clusters=3,
+            random_state=42,
+            n_init=10
         )
 
 
-        plt.scatter(
+        cluster = kmeans.fit_predict(
+            scaled
+        )
+
+
+
+        # =========================
+        # 그래프 생성
+        # =========================
+
+        fig, ax = plt.subplots(
+            2,
+            1,
+            figsize=(8,12)
+        )
+
+
+
+        # -------------------------
+        # 위 : 회귀 그래프
+        # -------------------------
+
+        ax[0].scatter(
             y,
             pred
         )
 
 
-        plt.xlabel(
+        ax[0].set_xlabel(
             "Actual"
         )
 
-        plt.ylabel(
+
+        ax[0].set_ylabel(
             "Predicted"
         )
 
 
-        plt.title(
-            f"{target} Actual vs Predicted"
+        ax[0].set_title(
+            f"{target} Regression"
         )
 
 
-        prediction_path = (
-            f"images/{target}_prediction.png"
+
+        # -------------------------
+        # 아래 : K-means
+        # -------------------------
+
+        ax[1].scatter(
+            data["X1"],
+            data["X2"],
+            c=cluster
         )
+
+
+        ax[1].set_xlabel(
+            "X1"
+        )
+
+
+        ax[1].set_ylabel(
+            "X2"
+        )
+
+
+        ax[1].set_title(
+            f"K-means clustering ({target})"
+        )
+
+
+
+        plt.tight_layout()
+
+
+
+        # =========================
+        # 이미지 -> base64 변환
+        # =========================
+
+        buffer = io.BytesIO()
 
 
         plt.savefig(
-            prediction_path
+            buffer,
+            format="png",
+            bbox_inches="tight"
         )
+
+
+        buffer.seek(0)
+
+
+        graph_image = base64.b64encode(
+            buffer.read()
+        ).decode()
+
+
 
         plt.close()
 
 
 
-        # =====================
-        # 잔차 그래프
-        # =====================
-
-        residual = y - pred
-
-
-        plt.figure(
-            figsize=(6,5)
-        )
-
-
-        plt.scatter(
-            pred,
-            residual
-        )
-
-
-        plt.axhline(
-            0,
-            linestyle="--"
-        )
-
-
-        plt.xlabel(
-            "Predicted"
-        )
-
-
-        plt.ylabel(
-            "Residual"
-        )
-
-
-        plt.title(
-            f"{target} Residual Plot"
-        )
-
-
-        residual_path = (
-            f"images/{target}_residual.png"
-        )
-
-
-        plt.savefig(
-            residual_path
-        )
-
-        plt.close()
-
-
-
+        # =========================
         # 결과 반환
+        # =========================
 
         return {
 
@@ -248,18 +286,22 @@ def run_analysis(file_list):
                 model.pvalues.to_dict(),
 
 
-            "prediction_image":
-                prediction_path,
+            "graph":
+                graph_image,
 
 
-            "residual_image":
-                residual_path
+            "clusters":
+                cluster.tolist(),
+
+
+            "cluster_centers":
+                kmeans.cluster_centers_.tolist()
         }
 
 
 
     # =========================
-    # Y1, Y2 분석
+    # Y1 / Y2 실행
     # =========================
 
     result_Y1 = fit_model(
@@ -295,6 +337,9 @@ def run_analysis(file_list):
             result_Y1,
 
 
+        "Y2":
+            result_Y2
+    }
         "Y2":
             result_Y2
     }
